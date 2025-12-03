@@ -134,7 +134,8 @@ class StaticMoEBlock(nn.Module):
         self.router = nn.Conv2d(channels, num_experts, 1)
 
     def forward(self, x):
-        # TODO: maximize the gate scores std during training
+        # NOTE: maximize the gate scores std during training
+        # NOTE: Normal DAMoE do not use the router output as expert output's factor, but I did so to keep the gradient to flow properly.
         B, C, H, W = x.shape
         self.router_scores = F.softmax(self.router(x), dim=1)  # (B, num_experts, H, W)
         expert_outputs = torch.stack([expert(x) for expert in self.experts], dim=1)  # (B, num_experts, C, H, W)
@@ -156,7 +157,8 @@ class DynamicMoEBlock(nn.Module):
         self.min_score = 0.5
 
     def forward(self, x):
-        # TODO: maximize the gate scores std during training
+        # NOTE: maximize the gate scores std during training
+        # NOTE: Normal DAMoE do not use the router output as expert output's factor, but I did so to keep the gradient to flow properly.
         # TODO: adjust min_score according to normal_active_experts
         B, C, H, W = x.shape
         self.router_scores = F.sigmoid(self.router(x), dim=1)  # (B, num_experts, H, W)
