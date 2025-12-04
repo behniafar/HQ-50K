@@ -86,8 +86,12 @@ class DDPM(nn.Module):
         self.net = net
         self.scheduler = scheduler
 
-    def forward(self, x, t):
+    def forward(self, x, t, mask = None):
+        if mask is None:
+            mask = torch.ones_like(x)
         timestep_embed = self.timestep_embed(t[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
+        zero_time_embed = self.timestep_embed(torch.zeros_like(t)[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
+        timestep_embed = timestep_embed * mask + zero_time_embed * (1-mask)
         return self.net(torch.cat([x, timestep_embed], dim=1))
     
     def loss(self, reals, repeat_factor=1, mask=None):
@@ -110,7 +114,7 @@ class DDPM(nn.Module):
         noise = torch.randn_like(reals)
         noised_reals = (reals * alphas + noise * sigmas) * mask + reals * (1 - mask)
         targets = noise * alphas - reals * sigmas
-        v = self(noised_reals, t)
+        v = self(noised_reals, t, mask)
         return torch.nn.functional.mse_loss(v * mask, targets * mask)
 
     @torch.no_grad()
@@ -176,8 +180,12 @@ class FlowMachine(nn.Module):
         self.net = net
         self.scheduler = LinearSchedule()
 
-    def forward(self, x, t):
+    def forward(self, x, t, mask = None):
+        if mask is None:
+            mask = torch.ones_like(x)
         timestep_embed = self.timestep_embed(t[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
+        zero_time_embed = self.timestep_embed(torch.zeros_like(t)[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
+        timestep_embed = timestep_embed * mask + zero_time_embed * (1-mask)
         return self.net(torch.cat([x, timestep_embed], dim=1))
     
     def loss(self, reals, repeat_factor=1, mask=None):
@@ -200,7 +208,7 @@ class FlowMachine(nn.Module):
         noise = torch.randn_like(reals)
         noised_reals = (reals * alphas + noise * sigmas) * mask + reals * (1 - mask)
         targets = reals - noise
-        v = self(noised_reals, t)
+        v = self(noised_reals, t, mask)
         return torch.nn.functional.mse_loss(v * mask, targets * mask)
 
     @torch.no_grad()
