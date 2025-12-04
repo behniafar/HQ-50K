@@ -95,26 +95,31 @@ class DDPM(nn.Module):
         timestep_embed = self.timestep_embed(t[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
         return self.net(torch.cat([x, timestep_embed], dim=1))
     
-    def loss(self, reals, repeat_factor=1):
+    def loss(self, reals, repeat_factor=1, mask=None):
         """ The costom loss for DDPM model.
-        Note: if it's too slow to load data, repeat them to increase batch size.
+        Note1: if it's too slow to load data, repeat them to increase batch size.
+        Note2: if you wanna remake some parts of image, use mask to specify the parts.
         Args:
             reals: The clean images.
             repeat_factor: The factor to repeat reals.
+            mask: The mask to specify the parts to remake.
         """
         reals = reals.repeat(repeat_factor, 1, 1, 1)
+        mask = mask.repeat(repeat_factor, 1, 1, 1) if mask is not None else torch.ones_like(reals)
         t = torch.rand(len(reals)).to(self.net.device)
         alphas, sigmas = self.scheduler(t)
         alphas = alphas[:, None, None, None]
         sigmas = sigmas[:, None, None, None]
+        alphas = torch.where(mask==1, alphas, torch.ones_like(alphas))
+        sigmas = torch.where(mask==1, sigmas, torch.zeros_like(sigmas))
         noise = torch.randn_like(reals)
         noised_reals = reals * alphas + noise * sigmas
         targets = noise * alphas - reals * sigmas
         v = self(noised_reals, t)
-        return torch.nn.functional.mse_loss(v, targets)
+        return torch.nn.functional.mse_loss(v * mask, targets * mask)
 
     @torch.no_grad()
-    def sample(self, x, steps, eta=1., start=1):
+    def sample(self, x, steps, eta=1., start=1, mask=None):
         """Draws samples from a model given starting noise.
 
         Note 1: eta is the amount of noise to add during sampling.
@@ -127,19 +132,24 @@ class DDPM(nn.Module):
         remember when you ganna add a little noise, use a scheduler
         and set start to used time in scheduler.
 
+        Note 3: if you wanna remake some parts of image, use mask to specify the parts.
+
         Args:
             model: The model to sample from.
             x: The starting noise.
             steps: The number of sampling steps.
             eta: The amount of noise to add during sampling.
             start: The starting time for sampling, should be in [0, 1].
+            mask: The mask to specify the parts to remake.
         """
-
         self.eval()
         ts = x.new_ones([x.shape[0]])
+        mask = mask if mask is not None else torch.zeros_like(x)
 
         t = torch.linspace(start, 0, steps + 1)[:-1]
         alphas, sigmas = self.scheduler(t)
+        alphas = torch.where(mask==1, alphas, torch.ones_like(alphas))
+        sigmas = torch.where(mask==1, sigmas, torch.zeros_like(sigmas))
 
         for i in trange(steps):
             v = self(x, ts * t[i]).float()
@@ -155,10 +165,10 @@ class DDPM(nn.Module):
                     (1 - alphas[i]**2 / alphas[i + 1]**2).sqrt()
                 adjusted_sigma = (sigmas[i + 1]**2 - ddim_sigma**2).sqrt()
 
-                x = pred * alphas[i + 1] + eps * adjusted_sigma
+                x = (pred * alphas[i + 1] + eps * adjusted_sigma) * mask + x * (1 - mask)
 
                 if eta:
-                    x += torch.randn_like(x) * ddim_sigma
+                    x += torch.randn_like(x) * ddim_sigma * mask
 
         # If we are on the last timestep, output the denoised image
         return pred
@@ -175,45 +185,54 @@ class FlowMachine(nn.Module):
         timestep_embed = self.timestep_embed(t[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
         return self.net(torch.cat([x, timestep_embed], dim=1))
     
-    def loss(self, reals, repeat_factor=1):
+    def loss(self, reals, repeat_factor=1, mask=None):
         """ The costom loss for flow machine model.
-        Note: if it's too slow to load data, repeat them to increase batch size.
+        Note1: if it's too slow to load data, repeat them to increase batch size.
+        Note2: if you wanna remake some parts of image, use mask to specify the parts.
         Args:
             reals: The clean images.
             repeat_factor: The factor to repeat reals.
+            mask: The mask to specify the parts to remake.
         """
         reals = reals.repeat(repeat_factor, 1, 1, 1)
+        mask = mask.repeat(repeat_factor, 1, 1, 1) if mask is not None else torch.ones_like(reals)
         t = torch.rand(len(reals)).to(self.net.device)
         alphas, sigmas = self.scheduler(t)
         alphas = alphas[:, None, None, None]
         sigmas = sigmas[:, None, None, None]
+        alphas = torch.where(mask==1, alphas, torch.ones_like(alphas))
+        sigmas = torch.where(mask==1, sigmas, torch.zeros_like(sigmas))
         noise = torch.randn_like(reals)
         noised_reals = reals * alphas + noise * sigmas
         targets = reals - noise
         v = self(noised_reals, t)
-        return torch.nn.functional.mse_loss(v, targets)
+        return torch.nn.functional.mse_loss(v * mask, targets * mask)
 
     @torch.no_grad()
-    def sample(self, x, steps, start=1):
+    def sample(self, x, steps, start=1, mask=None):
         """Draws samples from a model given starting noise.
 
-        Note: start is the starting time for sampling, should be in [0, 1].
+        Note 1: start is the starting time for sampling, should be in [0, 1].
         for example if you wanna increase the quality of an image,
         just add a little noise to it and set start to a small value like 0.1.
         remember when you ganna add a little noise, use a scheduler
         and set start to used time in scheduler.
+
+        Note 2: if you wanna remake some parts of image, use mask to specify the parts.
 
         Args:
             model: The model to sample from.
             x: The starting noise.
             steps: The number of sampling steps.
             start: The starting time for sampling, should be in [0, 1].
+            mask: The mask to specify the parts to remake.
         """
         self.eval()
         ts = x.new_ones([x.shape[0]])
+        mask = mask if mask is not None else torch.zeros_like(x)
 
         t = torch.linspace(start, 0, steps + 1)[:-1]
 
         for i in trange(steps):
-            x += self(x, ts * t[i]).float() / steps
+            x += self(x, ts * t[i]).float() / steps * mask
         return x
