@@ -1,12 +1,7 @@
-import os
 import torch
 from layers import *
 import torch.nn as nn
-from torch import optim
-from torchvision import utils
-from tqdm import trange, tqdm
-import torch.nn.functional as F
-import torchvision.transforms as TF
+from tqdm import trange
 
 class UNetLevel(nn.Module):
     def __init__(self,
@@ -113,7 +108,7 @@ class DDPM(nn.Module):
         alphas = torch.where(mask==1, alphas, torch.ones_like(alphas))
         sigmas = torch.where(mask==1, sigmas, torch.zeros_like(sigmas))
         noise = torch.randn_like(reals)
-        noised_reals = reals * alphas + noise * sigmas
+        noised_reals = (reals * alphas + noise * sigmas) * mask + reals * (1 - mask)
         targets = noise * alphas - reals * sigmas
         v = self(noised_reals, t)
         return torch.nn.functional.mse_loss(v * mask, targets * mask)
@@ -203,7 +198,7 @@ class FlowMachine(nn.Module):
         alphas = torch.where(mask==1, alphas, torch.ones_like(alphas))
         sigmas = torch.where(mask==1, sigmas, torch.zeros_like(sigmas))
         noise = torch.randn_like(reals)
-        noised_reals = reals * alphas + noise * sigmas
+        noised_reals = (reals * alphas + noise * sigmas) * mask + reals * (1 - mask)
         targets = reals - noise
         v = self(noised_reals, t)
         return torch.nn.functional.mse_loss(v * mask, targets * mask)
