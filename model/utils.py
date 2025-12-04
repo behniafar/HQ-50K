@@ -106,9 +106,9 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
         reals = reals.to(device)
 
         # Generate random masks
-        masks = torch.zeros_like(reals)
-        for mask_gen in mask_maker:
-            masks = torch.max(masks, mask_gen(reals.shape, device=device))
+        masks = [mask_gen(reals.shape, device=device)for mask_gen in mask_maker]
+        masks = torch.sum(torch.stack(masks, dim=0), dim=0)
+        masks = torch.clamp(masks, 0, 1)
         
         loss = model.loss(reals, mask=masks, repeat_factor=repeat_factor)
         loss.backward()
