@@ -8,12 +8,17 @@ class UNetLevel(nn.Module):
                  *channels: list[int],
                  next_level = None,
                  num_attention_head=None, 
-                 positional_encoding_type=None):
+                 positional_encoding_type=None,
+                 time_dims = 0):
         assert len(channels) >= 2, 'UNetLevel requires at least input and output channels'
         super().__init__()
+        channels = list(channels) # for modify, it can't be tuple
+        channels[0] += time_dims
+
         self.encoder = nn.Sequential(
             *[ResConvBlock(c_in, c_out, c_out) for c_in, c_out in zip(channels[:-1], channels[1:])]
         )
+        channels[0] -= time_dims # we don't need time dims for output
 
         if next_level is not None:
             self.next_level = nn.Sequential(
@@ -36,7 +41,6 @@ class UNetLevel(nn.Module):
         
     
         if self.next_level is not None:
-            channels = list(channels) # for modify, it can't be tuple
             channels[-1] *= 2 # concatenate skip connection
         self.decoder = nn.Sequential(
             *[ResConvBlock(c_in, c_in, c_out) for c_out, c_in in zip(reversed(channels[:-1]), reversed(channels[1:]))]
@@ -58,14 +62,17 @@ class UNet(nn.Module):
                 *channels: list[int],
                 num_blocks: int = 2,
                 num_attention_head: int = 4,
-                positional_encoding_type = FourierPositionalEncoding2d):
+                positional_encoding_type = FourierPositionalEncoding2d,
+                time_dims=16):
         assert  len(channels) >= 2, 'UNet at least have 2 levels'
         super().__init__()
         unet = UNetLevel(*([channels[-2]] + [channels[-1]] * num_blocks), num_attention_head=num_attention_head, positional_encoding_type=positional_encoding_type, next_level=
-                           UNetLevel(*([channels[-1]] + [channels[-1]] * num_blocks), num_attention_head=num_attention_head, positional_encoding_type=positional_encoding_type, next_level=None))
-        for level in range(len(channels) - 2, 0, -1):
-            unet = UNetLevel(*([channels[level-1]] + [channels[level]] * num_blocks), next_level=unet)
-        self.unet = unet
+                           UNetLevel(*([channels[-1]] + [channels[-1]] * num_blocks), num_attention_head=num_attention_head, positional_encoding_type=positional_encoding_type, next_level=None, time_dims=time_dims if len(channels) == 2 else 0))
+        if len(channels) > 2:
+            for level in range(len(channels) - 2, 1, -1):
+                unet = UNetLevel(*([channels[level-1]] + [channels[level]] * num_blocks), next_level=unet)
+            unet = UNetLevel(*([channels[0]] + [channels[1]] * num_blocks), next_level=unet, time_dims=time_dims)
+            self.unet = unet
     
     def forward(self, x):
         return self.unet(x)
