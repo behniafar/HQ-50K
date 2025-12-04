@@ -54,6 +54,8 @@ class RandomSquareMask:
         self.max_size = max_size
 
     def __call__(self, shape, device=device):
+        shape = list(shape)
+        shape[1] = 1
         B, C, H, W = shape
         masks = torch.zeros(shape, device=device)
         for i in range(B):
@@ -69,6 +71,8 @@ class RandomCircleMask:
         self.max_radius = max_radius
 
     def __call__(self, shape, device=device):
+        shape = list(shape)
+        shape[1] = 1
         B, C, H, W = shape
         masks = torch.zeros(shape, device=device)
         Y, X = torch.meshgrid(torch.arange(H, device=device), torch.arange(W, device=device), indexing='ij')
