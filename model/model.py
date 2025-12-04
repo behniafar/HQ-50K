@@ -153,7 +153,7 @@ class DDPM(nn.Module):
             mask: The mask to specify the parts to remake.
         """
         self.eval()
-        ts = x.new_ones([x.shape[0]], device)
+        ts = x.new_ones([x.shape[0]])
 
         t = torch.linspace(start, 0, steps + 1)[:-1]
         alphas, sigmas = self.scheduler(t)
@@ -163,7 +163,7 @@ class DDPM(nn.Module):
             alphas = torch.where(mask.unsqueeze(0)==1, alphas, torch.ones_like(alphas))
             sigmas = torch.where(mask.unsqueeze(0)==1, sigmas, torch.zeros_like(sigmas) + 1e-8)
 
-        mask = mask if mask is not None else torch.zeros([x.shape[0], 1, *x.shape[2:]], device=device)
+        mask = mask if mask is not None else torch.ones([x.shape[0], 1, *x.shape[2:]], device=device)
         for i in trange(steps):
             v = self(x, ts * t[i], mask).float()
             pred = x * alphas[i] - v * sigmas[i]
@@ -246,7 +246,7 @@ class FlowMachine(nn.Module):
         """
         self.eval()
         ts = x.new_ones([x.shape[0]])
-        mask = mask if mask is not None else torch.zeros([x.shape[0], 1, *x.shape[2:]], device=device)
+        mask = mask if mask is not None else torch.ones([x.shape[0], 1, *x.shape[2:]], device=device)
 
         t = torch.linspace(start, 0, steps + 1)[:-1]
 
