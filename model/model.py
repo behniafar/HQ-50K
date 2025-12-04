@@ -155,13 +155,13 @@ class DDPM(nn.Module):
 
         t = torch.linspace(start, 0, steps + 1)[:-1]
         alphas, sigmas = self.scheduler(t)
-
-        mask = mask if mask is not None else torch.zeros([x.shape[0], 1, *x.shape[2:]])
         if mask is not None:
             alphas = alphas[:, None, None, None, None].repeat(1, *mask.shape)
             sigmas = sigmas[:, None, None, None, None].repeat(1, *mask.shape)
             alphas = torch.where(mask.unsqueeze(0)==1, alphas, torch.ones_like(alphas))
-            sigmas = torch.where(mask.unsqueeze(0)==1, sigmas, torch.zeros_like(sigmas))
+            sigmas = torch.where(mask.unsqueeze(0)==1, sigmas, torch.zeros_like(sigmas) + 1e-8)
+
+        mask = mask if mask is not None else torch.zeros([x.shape[0], 1, *x.shape[2:]])
         for i in trange(steps):
             v = self(x, ts * t[i], mask).float()
             pred = x * alphas[i] - v * sigmas[i]

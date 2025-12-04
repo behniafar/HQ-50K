@@ -130,7 +130,7 @@ def masked_demo(model, images, masks = None, steps=50, filename=None):
     fakes = model.sample(images * (1 - masks) + noise * masks, mask=masks, steps=steps)
 
     B = images.shape[0]
-    grid = U.make_grid(torch.cat([images, masks, fakes], dim=0), int(B**0.5)).cpu()
+    grid = U.make_grid(torch.cat([images, fakes], dim=0), int(B**0.5)).cpu()
     if filename is None:
         filename = f'masked_demo.png'
     print(grid.mean(), grid.std())
