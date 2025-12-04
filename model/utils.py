@@ -19,18 +19,18 @@ def train(model, dataloader, optimizer, repeat_factor = 1, ema = .9):
         ema: Exponential moving average factor for loss smoothing.
     """
     model.train()
-    total_loss = 0
+    total_loss = None
     bar = tqdm(dataloader)
     for reals in bar:
         optimizer.zero_grad()
         reals = reals.to(model.device)
 
         loss = model.loss(reals, repeat_factor=repeat_factor)
-        bar.set_description(f"Loss: {loss.item():.6f}")
+        bar.set_description(f"Loss: {total_loss:.6f}")
 
         loss.backward()
         optimizer.step()
-        total_loss = loss.item() * (1 - ema) + total_loss * ema
+        total_loss = loss.item() * (1 - ema) + total_loss * ema if total_loss is not None else loss.item()
 
 @torch.no_grad()
 def demo(model, size, steps, n = 3, filename = None):
@@ -92,7 +92,7 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
         ema: Exponential moving average factor for loss smoothing.
     """
     model.train()
-    total_loss = 0
+    total_loss = None
     bar = tqdm(dataloader)
     for reals in bar:
         optimizer.zero_grad()
@@ -104,11 +104,11 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
             masks = torch.max(masks, mask_gen(reals.shape, device=model.device))
         
         loss = model.loss(reals, masks=masks, repeat_factor=repeat_factor)
-        bar.set_description(f"Loss: {loss.item():.6f}")
+        bar.set_description(f"Loss: {total_loss:.6f}")
 
         loss.backward()
         optimizer.step()
-        total_loss = loss.item() * (1 - ema) + total_loss * ema
+        total_loss = loss.item() * (1 - ema) + total_loss * ema if total_loss is not None else loss.item()
 
 @torch.no_grad()
 def masked_demo(model, images, masks = None, steps=50, filename=None):
