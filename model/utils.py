@@ -4,7 +4,7 @@ from torch import optim
 from tqdm import trange, tqdm
 import torch.nn.functional as F
 from torchvision import utils as U
-import torchvision.transforms as TF
+from torchvision.transforms import functional as TF
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -44,10 +44,10 @@ def demo(model, size, steps, n = 3, filename = None):
     grid = U.make_grid(fakes, n).cpu()
     if filename is None:
         filename = f'demo.png'
-    print(grid.mean(), grid.std())
-    U.save_image(grid.clamp(0, 1), filename)
+    grid = TF.to_pil_image(grid.clamp(0, 1))
+    grid.save(filename)
     tqdm.write(f'Demo saved to {os.path.abspath(filename)}\n')
-    return grid.clamp(0, 1)
+    return grid
 
 class RandomSquareMask:
     def __init__(self, min_size=16, max_size=64):
@@ -134,10 +134,10 @@ def masked_demo(model, images, masks = None, steps=50, filename=None):
     grid = U.make_grid(torch.cat([images, fakes], dim=0), int(B**0.5)).cpu()
     if filename is None:
         filename = f'masked_demo.png'
-    print(grid.mean(), grid.std())
-    U.save_image(grid.clamp(0, 1), filename)
+    grid = TF.to_pil_image(grid.clamp(0, 1))
+    grid.save(filename)
     tqdm.write(f'Masked demo saved to {os.path.abspath(filename)}\n')
-    return grid.clamp(0, 1)
+    return grid
 
 def save_model(model, optimizer, epoch, filename='model.pth'):
     torch.save({
