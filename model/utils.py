@@ -47,6 +47,7 @@ def demo(model, size, steps, n = 3, filename = None):
     print(grid.mean(), grid.std())
     U.save_image(grid.clamp(0, 1), filename)
     tqdm.write(f'Demo saved to {os.path.abspath(filename)}\n')
+    return grid.clamp(0, 1)
 
 class RandomSquareMask:
     def __init__(self, min_size=16, max_size=64):
@@ -136,6 +137,7 @@ def masked_demo(model, images, masks = None, steps=50, filename=None):
     print(grid.mean(), grid.std())
     U.save_image(grid.clamp(0, 1), filename)
     tqdm.write(f'Masked demo saved to {os.path.abspath(filename)}\n')
+    return grid.clamp(0, 1)
 
 def save_model(model, optimizer, epoch, filename='model.pth'):
     torch.save({
