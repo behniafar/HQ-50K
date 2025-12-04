@@ -78,10 +78,12 @@ class UNet(nn.Module):
         return self.unet(x)
 
 class CosineSchedule:
+    @staticmethod
     def __call__(t):
         return torch.cos(t * torch.pi / 2), torch.sin(t * torch.pi / 2)
 
 class LinearSchedule:
+    @staticmethod
     def __call__(t):
         return 1 - t, t
 
@@ -95,7 +97,7 @@ class DDPM(nn.Module):
 
     def forward(self, x, t, mask = None):
         if mask is None:
-            mask = torch.ones_like(x)
+            mask = torch.ones(x.shape)
         timestep_embed = self.timestep_embed(t[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
         zero_time_embed = self.timestep_embed(torch.zeros_like(t)[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
         timestep_embed = timestep_embed * mask + zero_time_embed * (1-mask)
@@ -111,7 +113,7 @@ class DDPM(nn.Module):
             mask: The mask to specify the parts to remake.
         """
         reals = reals.repeat(repeat_factor, 1, 1, 1)
-        mask = mask.repeat(repeat_factor, 1, 1, 1) if mask is not None else torch.ones_like(reals)
+        mask = mask.repeat(repeat_factor, 1, 1, 1) if mask is not None else torch.ones([reals.shape[0], 1, *reals.shape[2:]])
         t = torch.rand(len(reals)).to(self.net.device)
         alphas, sigmas = self.scheduler(t)
         alphas = alphas[:, None, None, None]
@@ -150,15 +152,18 @@ class DDPM(nn.Module):
         """
         self.eval()
         ts = x.new_ones([x.shape[0]])
-        mask = mask if mask is not None else torch.zeros_like(x)
 
         t = torch.linspace(start, 0, steps + 1)[:-1]
         alphas, sigmas = self.scheduler(t)
-        alphas = torch.where(mask==1, alphas, torch.ones_like(alphas))
-        sigmas = torch.where(mask==1, sigmas, torch.zeros_like(sigmas))
 
+        mask = mask if mask is not None else torch.zeros([x.shape[0], 1, *x.shape[2:]])
+        if mask is not None:
+            alphas = alphas[:, None, None, None, None].repeat(1, *mask.shape)
+            sigmas = sigmas[:, None, None, None, None].repeat(1, *mask.shape)
+            alphas = torch.where(mask.unsqueeze(0)==1, alphas, torch.ones_like(alphas))
+            sigmas = torch.where(mask.unsqueeze(0)==1, sigmas, torch.zeros_like(sigmas))
         for i in trange(steps):
-            v = self(x, ts * t[i]).float()
+            v = self(x, ts * t[i], mask).float()
             pred = x * alphas[i] - v * sigmas[i]
             eps = x * sigmas[i] + v * alphas[i]
 
@@ -189,7 +194,7 @@ class FlowMachine(nn.Module):
 
     def forward(self, x, t, mask = None):
         if mask is None:
-            mask = torch.ones_like(x)
+            mask = torch.ones(x.shape)
         timestep_embed = self.timestep_embed(t[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
         zero_time_embed = self.timestep_embed(torch.zeros_like(t)[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
         timestep_embed = timestep_embed * mask + zero_time_embed * (1-mask)
@@ -205,7 +210,7 @@ class FlowMachine(nn.Module):
             mask: The mask to specify the parts to remake.
         """
         reals = reals.repeat(repeat_factor, 1, 1, 1)
-        mask = mask.repeat(repeat_factor, 1, 1, 1) if mask is not None else torch.ones_like(reals)
+        mask = mask.repeat(repeat_factor, 1, 1, 1) if mask is not None else torch.ones([reals.shape[0], 1, *reals.shape[2:]])
         t = torch.rand(len(reals)).to(self.net.device)
         alphas, sigmas = self.scheduler(t)
         alphas = alphas[:, None, None, None]
@@ -239,10 +244,10 @@ class FlowMachine(nn.Module):
         """
         self.eval()
         ts = x.new_ones([x.shape[0]])
-        mask = mask if mask is not None else torch.zeros_like(x)
+        mask = mask if mask is not None else torch.zeros([x.shape[0], 1, *x.shape[2:]])
 
         t = torch.linspace(start, 0, steps + 1)[:-1]
 
         for i in trange(steps):
-            x += self(x, ts * t[i]).float() / steps * mask
+            x += self(x, ts * t[i], mask).float() / steps * mask
         return x
