@@ -110,7 +110,7 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
         for mask_gen in mask_maker:
             masks = torch.max(masks, mask_gen(reals.shape, device=device))
         
-        loss = model.loss(reals, masks=masks, repeat_factor=repeat_factor)
+        loss = model.loss(reals, mask=masks, repeat_factor=repeat_factor)
         loss.backward()
         optimizer.step()
         
