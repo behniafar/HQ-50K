@@ -75,8 +75,145 @@ class UNet(nn.Module):
     def forward(self, x):
         return self.unet(x)
 
-if __name__ == '__main__':
-    model = UNet(3, 64, 128, 256, num_blocks=2, num_attention_head=4, positional_encoding_type=FourierPositionalEncoding2d)
-    x = torch.randn(1, 3, 128, 128)
-    y = model(x)
-    print(y.shape)
+class CosineSchedule:
+    def __call__(t):
+        return torch.cos(t * torch.pi / 2), torch.sin(t * torch.pi / 2)
+
+class LinearSchedule:
+    def __call__(t):
+        return 1 - t, t
+
+class DDPM(nn.Module):
+    def __init__(self, net: nn.Module, timestep_embedding_dim = 16, scheduler=CosineSchedule()):
+        super().__init__()
+
+        self.timestep_embed = FourierFeatures(1, timestep_embedding_dim)
+        self.net = net
+        self.scheduler = scheduler
+
+    def forward(self, x, t):
+        timestep_embed = self.timestep_embed(t[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
+        return self.net(torch.cat([x, timestep_embed], dim=1))
+    
+    def loss(self, reals, repeat_factor=1):
+        """ The costom loss for DDPM model.
+        Note: if it's too slow to load data, repeat them to increase batch size.
+        Args:
+            reals: The clean images.
+            repeat_factor: The factor to repeat reals.
+        """
+        reals = reals.repeat(repeat_factor, 1, 1, 1)
+        t = torch.rand(len(reals)).to(self.net.device)
+        alphas, sigmas = self.scheduler(t)
+        alphas = alphas[:, None, None, None]
+        sigmas = sigmas[:, None, None, None]
+        noise = torch.randn_like(reals)
+        noised_reals = reals * alphas + noise * sigmas
+        targets = noise * alphas - reals * sigmas
+        v = self(noised_reals, t)
+        return torch.nn.functional.mse_loss(v, targets)
+
+    @torch.no_grad()
+    def sample(self, x, steps, eta=1., start=1):
+        """Draws samples from a model given starting noise.
+
+        Note 1: eta is the amount of noise to add during sampling.
+        eta=0, keep old noise and add no new noise (DDIM)
+        eta=1, throw away old noise and add new noise (DDPM)
+
+        Note 2: start is the starting time for sampling, should be in [0, 1].
+        for example if you wanna increase the quality of an image,
+        just add a little noise to it and set start to a small value like 0.1.
+        remember when you ganna add a little noise, use a scheduler
+        and set start to used time in scheduler.
+
+        Args:
+            model: The model to sample from.
+            x: The starting noise.
+            steps: The number of sampling steps.
+            eta: The amount of noise to add during sampling.
+            start: The starting time for sampling, should be in [0, 1].
+        """
+
+        self.eval()
+        ts = x.new_ones([x.shape[0]])
+
+        t = torch.linspace(start, 0, steps + 1)[:-1]
+        alphas, sigmas = self.scheduler(t)
+
+        for i in trange(steps):
+            v = self(x, ts * t[i]).float()
+            pred = x * alphas[i] - v * sigmas[i]
+            eps = x * sigmas[i] + v * alphas[i]
+
+            # If we are not on the last timestep, compute the noisy image for the
+            # next timestep.
+            if i < steps - 1:
+                # If eta > 0, adjust the scaling factor for the predicted noise
+                # downward according to the amount of additional noise to add
+                ddim_sigma = eta * (sigmas[i + 1]**2 / sigmas[i]**2).sqrt() * \
+                    (1 - alphas[i]**2 / alphas[i + 1]**2).sqrt()
+                adjusted_sigma = (sigmas[i + 1]**2 - ddim_sigma**2).sqrt()
+
+                x = pred * alphas[i + 1] + eps * adjusted_sigma
+
+                if eta:
+                    x += torch.randn_like(x) * ddim_sigma
+
+        # If we are on the last timestep, output the denoised image
+        return pred
+
+class FlowMachine(nn.Module):
+    def __init__(self, net: nn.Module, timestep_embedding_dim = 16):
+        super().__init__()
+
+        self.timestep_embed = FourierFeatures(1, timestep_embedding_dim)
+        self.net = net
+        self.scheduler = LinearSchedule()
+
+    def forward(self, x, t):
+        timestep_embed = self.timestep_embed(t[:, None])[..., None, None].repeat([1, 1, x.shape[2], x.shape[3]])
+        return self.net(torch.cat([x, timestep_embed], dim=1))
+    
+    def loss(self, reals, repeat_factor=1):
+        """ The costom loss for flow machine model.
+        Note: if it's too slow to load data, repeat them to increase batch size.
+        Args:
+            reals: The clean images.
+            repeat_factor: The factor to repeat reals.
+        """
+        reals = reals.repeat(repeat_factor, 1, 1, 1)
+        t = torch.rand(len(reals)).to(self.net.device)
+        alphas, sigmas = self.scheduler(t)
+        alphas = alphas[:, None, None, None]
+        sigmas = sigmas[:, None, None, None]
+        noise = torch.randn_like(reals)
+        noised_reals = reals * alphas + noise * sigmas
+        targets = reals - noise
+        v = self(noised_reals, t)
+        return torch.nn.functional.mse_loss(v, targets)
+
+    @torch.no_grad()
+    def sample(self, x, steps, start=1):
+        """Draws samples from a model given starting noise.
+
+        Note: start is the starting time for sampling, should be in [0, 1].
+        for example if you wanna increase the quality of an image,
+        just add a little noise to it and set start to a small value like 0.1.
+        remember when you ganna add a little noise, use a scheduler
+        and set start to used time in scheduler.
+
+        Args:
+            model: The model to sample from.
+            x: The starting noise.
+            steps: The number of sampling steps.
+            start: The starting time for sampling, should be in [0, 1].
+        """
+        self.eval()
+        ts = x.new_ones([x.shape[0]])
+
+        t = torch.linspace(start, 0, steps + 1)[:-1]
+
+        for i in trange(steps):
+            x += self(x, ts * t[i]).float() / steps
+        return x
