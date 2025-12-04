@@ -23,16 +23,16 @@ def train(model, dataloader, optimizer, repeat_factor = 1, ema = .9):
     model.train()
     total_loss = None
     bar = tqdm(dataloader)
-    for reals in bar:
+    for reals, _ in bar:
         optimizer.zero_grad()
         reals = reals.to(device)
 
         loss = model.loss(reals, repeat_factor=repeat_factor)
+        total_loss = loss.item() * (1 - ema) + total_loss * ema if total_loss is not None else loss.item()
         bar.set_description(f"Loss: {total_loss:.6f}")
 
         loss.backward()
         optimizer.step()
-        total_loss = loss.item() * (1 - ema) + total_loss * ema if total_loss is not None else loss.item()
 
 @torch.no_grad()
 def demo(model, size, steps, n = 3, filename = None):
@@ -100,7 +100,7 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
     model.train()
     total_loss = None
     bar = tqdm(dataloader)
-    for reals in bar:
+    for reals, _ in bar:
         optimizer.zero_grad()
         reals = reals.to(device)
 

@@ -3,6 +3,8 @@ from layers import *
 import torch.nn as nn
 from tqdm import trange
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 class UNetLevel(nn.Module):
     def __init__(self,
                  *channels: list[int],
@@ -114,7 +116,7 @@ class DDPM(nn.Module):
         """
         reals = reals.repeat(repeat_factor, 1, 1, 1)
         mask = mask.repeat(repeat_factor, 1, 1, 1) if mask is not None else torch.ones([reals.shape[0], 1, *reals.shape[2:]])
-        t = torch.rand(len(reals)).to(self.net.device)
+        t = torch.rand(len(reals)).to(device)
         alphas, sigmas = self.scheduler(t)
         alphas = alphas[:, None, None, None]
         sigmas = sigmas[:, None, None, None]
@@ -211,7 +213,7 @@ class FlowMachine(nn.Module):
         """
         reals = reals.repeat(repeat_factor, 1, 1, 1)
         mask = mask.repeat(repeat_factor, 1, 1, 1) if mask is not None else torch.ones([reals.shape[0], 1, *reals.shape[2:]])
-        t = torch.rand(len(reals)).to(self.net.device)
+        t = torch.rand(len(reals)).to(device)
         alphas, sigmas = self.scheduler(t)
         alphas = alphas[:, None, None, None]
         sigmas = sigmas[:, None, None, None]
