@@ -6,6 +6,8 @@ import torch.nn.functional as F
 from torchvision import utils as U
 import torchvision.transforms as TF
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 def train(model, dataloader, optimizer, repeat_factor = 1, ema = .9):
     """
     Trains the model for one epoch.
@@ -23,7 +25,7 @@ def train(model, dataloader, optimizer, repeat_factor = 1, ema = .9):
     bar = tqdm(dataloader)
     for reals in bar:
         optimizer.zero_grad()
-        reals = reals.to(model.device)
+        reals = reals.to(device)
 
         loss = model.loss(reals, repeat_factor=repeat_factor)
         bar.set_description(f"Loss: {total_loss:.6f}")
@@ -36,7 +38,7 @@ def train(model, dataloader, optimizer, repeat_factor = 1, ema = .9):
 def demo(model, size, steps, n = 3, filename = None):
     torch.manual_seed(0)
 
-    noise = torch.randn([n**2, 3, *size], device=model.device)
+    noise = torch.randn([n**2, 3, *size], device=device)
     fakes = model.sample(noise, steps=steps)
 
     grid = U.make_grid(fakes, n).cpu()
@@ -51,7 +53,7 @@ class RandomSquareMask:
         self.min_size = min_size
         self.max_size = max_size
 
-    def __call__(self, shape, device='cpu'):
+    def __call__(self, shape, device=device):
         B, C, H, W = shape
         masks = torch.zeros(shape, device=device)
         for i in range(B):
@@ -66,7 +68,7 @@ class RandomCircleMask:
         self.min_radius = min_radius
         self.max_radius = max_radius
 
-    def __call__(self, shape, device='cpu'):
+    def __call__(self, shape, device=device):
         B, C, H, W = shape
         masks = torch.zeros(shape, device=device)
         Y, X = torch.meshgrid(torch.arange(H, device=device), torch.arange(W, device=device), indexing='ij')
@@ -96,12 +98,12 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
     bar = tqdm(dataloader)
     for reals in bar:
         optimizer.zero_grad()
-        reals = reals.to(model.device)
+        reals = reals.to(device)
 
         # Generate random masks
         masks = torch.zeros_like(reals)
         for mask_gen in mask_maker:
-            masks = torch.max(masks, mask_gen(reals.shape, device=model.device))
+            masks = torch.max(masks, mask_gen(reals.shape, device=device))
         
         loss = model.loss(reals, masks=masks, repeat_factor=repeat_factor)
         bar.set_description(f"Loss: {total_loss:.6f}")
@@ -114,11 +116,11 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
 def masked_demo(model, images, masks = None, steps=50, filename=None):
     torch.manual_seed(0)
 
-    images = images.to(model.device)
+    images = images.to(device)
     if masks is None:
         masks = torch.ones_like(images)
     else:
-        masks = masks.to(model.device)
+        masks = masks.to(device)
 
     noise = torch.randn_like(images)
     fakes = model.sample(images * (1 - masks) + noise * masks, mask=masks, steps=steps)
