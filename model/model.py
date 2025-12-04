@@ -74,7 +74,7 @@ class UNet(nn.Module):
             for level in range(len(channels) - 2, 1, -1):
                 unet = UNetLevel(*([channels[level-1]] + [channels[level]] * num_blocks), next_level=unet)
             unet = UNetLevel(*([channels[0]] + [channels[1]] * num_blocks), next_level=unet, time_dims=time_dims)
-            self.unet = unet
+        self.unet = unet
     
     def forward(self, x):
         return self.unet(x)

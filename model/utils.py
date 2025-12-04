@@ -110,11 +110,11 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
             masks = torch.max(masks, mask_gen(reals.shape, device=device))
         
         loss = model.loss(reals, masks=masks, repeat_factor=repeat_factor)
-        bar.set_description(f"Loss: {total_loss:.6f}")
-
         loss.backward()
         optimizer.step()
+        
         total_loss = loss.item() * (1 - ema) + total_loss * ema if total_loss is not None else loss.item()
+        bar.set_description(f"Loss: {total_loss:.6f}")
 
 @torch.no_grad()
 def masked_demo(model, images, masks = None, steps=50, filename=None):
