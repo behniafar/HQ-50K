@@ -150,12 +150,15 @@ class StaticMoEBlock(nn.Module):
         return output
 
 class DynamicMoEBlock(nn.Module):
-    def __init__(self, channels, num_experts=4, normal_active_experts = 1, expansion=4):
+    def __init__(self, channels, num_experts=4, normal_active_experts = 1, expansion=4, alpha=0.1):
+        assert num_experts >= 2, "num_experts must be at least 2"
         super().__init__()
+        normal_active_experts = max(1, min(normal_active_experts, num_experts-1)) # clip normal_active_experts to [1, num_experts-1]
         self.num_experts = num_experts
         self.experts = nn.ModuleList([
-            FeedForward(channels, expansion) for _ in range(num_experts)
+            FeedForward(channels, expansion) for _ in range(num_experts-1)
         ])
+        self.full_time_active_expert = FeedForward(channels, expansion)
         self.normal_active_experts = normal_active_experts
         self.router = nn.Conv2d(channels, num_experts, 1)
         self.min_score = 0.5
@@ -165,17 +168,13 @@ class DynamicMoEBlock(nn.Module):
         # NOTE: Normal DAMoE do not use the router output as expert output's factor, but I did so to keep the gradient to flow properly.
         # TODO: adjust min_score according to normal_active_experts
         B, C, H, W = x.shape
-        self.router_scores = F.sigmoid(self.router(x), dim=1)  # (B, num_experts, H, W)
-        expert_outputs = torch.stack([expert(x) for expert in self.experts], dim=1)  # (B, num_experts, C, H, W)
-        mask = torch.zeros_like(self.router_scores)
-        selected_experts = (self.router_scores > self.min_score).float().sum(dim=1, keepdim=True)  # (B, 1, H, W)
-        mask = torch.zeros_like(self.router_scores)
-        mask[self.router_scores > self.min_score] = self.router_scores[self.router_scores > self.min_score]
-        top_one_scores, top_one_indices = torch.topk(self.router_scores, k=1, dim=1)  # (B, 1, H, W)
-        top_one = torch.zeros_like(self.router_scores)
-        top_one.scatter_(1, top_one_indices, top_one_scores)
-        mask = torch.where(selected_experts < 1, top_one, mask)
-        output = (expert_outputs * mask.unsqueeze(2)).sum(dim=1) # (B, C, H, W)
+        x = x.permute(0, 2, 3, 1).reshape(-1, C)  # (B*H*W, C)
+        output = self.full_time_active_expert(x)  # (B*H*W, C)
+        self.router_scores = F.sigmoid(self.router(x))  # (B*H*W, num_experts)
+        for expert_idx in range(self.experts.__len__()):
+            mask = self.router_scores[:, expert_idx] >= self.min_score  # (B*H*W)
+            output[mask] = output[mask] + self.experts[expert_idx](x[mask]) * self.router_scores[mask, expert_idx:expert_idx+1]
+        output = output.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
         return output
 
 MoEBlock = StaticMoEBlock  # default MoEBlock
