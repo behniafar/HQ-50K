@@ -11,7 +11,8 @@ class UNetLevel(nn.Module):
                  next_level = None,
                  num_attention_head=None, 
                  positional_encoding_type=None,
-                 time_dims = 0):
+                 time_dims = 0,
+                 MoEBlock=None):
         assert len(channels) >= 2, 'UNetLevel requires at least input and output channels'
         super().__init__()
         channels = list(channels) # for modify, it can't be tuple
@@ -40,6 +41,8 @@ class UNetLevel(nn.Module):
 
         if num_attention_head is not None:
             self.encoder.add_module('self attention', SelfAttention(channels[-1], num_attention_head))
+            if MoEBlock is not None:
+                self.encoder.add_module('MoE Block', MoEBlock)
         
     
         if self.next_level is not None:
@@ -64,12 +67,20 @@ class UNet(nn.Module):
                 *channels: list[int],
                 num_blocks: int = 2,
                 num_attention_head: int = 4,
-                positional_encoding_type = FourierPositionalEncoding2d,
-                time_dims=16):
+                positional_encoding_type = PositionalEncoding2d,
+                time_dims=16,
+                MoEBlock_type=None,
+                num_experts=8,
+                k = 1,
+                expansion=4):
         assert  len(channels) >= 2, 'UNet at least have 2 levels'
+        if MoEBlock_type == StaticMoEBlock:
+            assert k % 1 == 0, "k must be an integer for StaticMoEBlock, or you can use DynamicMoEBlock instead"
         super().__init__()
         unet = UNetLevel(*([channels[-2]] + [channels[-1]] * num_blocks), num_attention_head=num_attention_head, positional_encoding_type=positional_encoding_type, next_level=
-                           UNetLevel(*([channels[-1]] + [channels[-1]] * num_blocks), num_attention_head=num_attention_head, positional_encoding_type=positional_encoding_type, next_level=None, time_dims=time_dims if len(channels) == 2 else 0))
+                           UNetLevel(*([channels[-1]] + [channels[-1]] * num_blocks), num_attention_head=num_attention_head, positional_encoding_type=positional_encoding_type, next_level=None, time_dims=time_dims if len(channels) == 2 else 0,
+                                     MoEBlock=MoEBlock_type(channels[-1], num_experts, k, expansion) if MoEBlock_type is not None else None),
+                         MoEBlock=MoEBlock_type(channels[-1], num_experts, k, expansion) if MoEBlock_type is not None else None, time_dims=0)
         if len(channels) > 2:
             for level in range(len(channels) - 2, 1, -1):
                 unet = UNetLevel(*([channels[level-1]] + [channels[level]] * num_blocks), next_level=unet)

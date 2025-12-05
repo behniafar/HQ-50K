@@ -145,16 +145,16 @@ class StaticMoEBlock(nn.Module):
         topk_scores, topk_indices = torch.topk(self.router_scores, k=self.k, dim=1)
         for expert_idx in range(self.experts.__len__()):
             mask = (topk_indices == expert_idx).any(dim=1)  # (B*H*W)
-            output[mask] = self.experts[expert_idx](x[mask]) * self.router_scores[mask, expert_idx:expert_idx+1]
+            if mask.any(): output[mask] = self.experts[expert_idx](x[mask]) * self.router_scores[mask, expert_idx:expert_idx+1]
         output = output.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
         return output
 
 class DynamicMoEBlock(nn.Module):
-    def __init__(self, channels, num_experts=4, normal_active_experts = .5, expansion=4, alpha=0.1):
+    def __init__(self, channels, num_experts=8, k = .5, expansion=4, alpha=0.1):
         assert num_experts >= 2, "num_experts must be at least 2"
         super().__init__()
         self.alpha = alpha
-        normal_active_experts = max(.1, min(normal_active_experts, num_experts-1)) # clip normal_active_experts to [.1, num_experts-1]
+        normal_active_experts = max(.1, min(k, num_experts-1)) # clip normal_active_experts to [.1, num_experts-1]
         self.num_experts = num_experts
         self.experts = nn.ModuleList([
             FeedForward(channels, expansion) for _ in range(num_experts-1)
@@ -171,13 +171,13 @@ class DynamicMoEBlock(nn.Module):
         x = x.permute(0, 2, 3, 1).reshape(-1, C)  # (B*H*W, C)
         output = self.full_time_active_expert(x)  # (B*H*W, C)
         self.router_scores = F.sigmoid(self.router(x))  # (B*H*W, num_experts)
+        num_active_experts = (self.router_scores >= self.min_score).float().sum(dim=1, keepdim=True)
         for expert_idx in range(self.experts.__len__()):
             mask = self.router_scores[:, expert_idx] >= self.min_score  # (B*H*W)
-            output[mask] = output[mask] + self.experts[expert_idx](x[mask]) * self.router_scores[mask, expert_idx:expert_idx+1]
+            if mask.any(): output[mask] = output[mask] + self.experts[expert_idx](x[mask]) * self.router_scores[mask, expert_idx:expert_idx+1] / num_active_experts[mask]
         output = output.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
         if self.training:
-            num_active_experts = (self.router_scores >= self.min_score).float().sum(dim=1).mean().item()
-            self.min_score = self.min_score + self.alpha * (num_active_experts - self.normal_active_experts)
+            self.min_score = self.min_score + self.alpha * (num_active_experts.mean().item() - self.normal_active_experts)
         return output
 
 MoEBlock = StaticMoEBlock  # default MoEBlock
