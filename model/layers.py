@@ -150,18 +150,18 @@ class StaticMoEBlock(nn.Module):
         return output
 
 class DynamicMoEBlock(nn.Module):
-    def __init__(self, channels, num_experts=4, normal_active_experts = 1, expansion=4, alpha=0.1):
+    def __init__(self, channels, num_experts=4, normal_active_experts = .5, expansion=4, alpha=0.1):
         assert num_experts >= 2, "num_experts must be at least 2"
         super().__init__()
         self.alpha = alpha
-        normal_active_experts = max(1, min(normal_active_experts, num_experts-1)) # clip normal_active_experts to [1, num_experts-1]
+        normal_active_experts = max(.1, min(normal_active_experts, num_experts-1)) # clip normal_active_experts to [.1, num_experts-1]
         self.num_experts = num_experts
         self.experts = nn.ModuleList([
             FeedForward(channels, expansion) for _ in range(num_experts-1)
         ])
         self.full_time_active_expert = FeedForward(channels, expansion)
         self.normal_active_experts = normal_active_experts
-        self.router = nn.Conv2d(channels, num_experts, 1)
+        self.router = nn.Linear(channels, num_experts)
         self.min_score = 0.5
 
     def forward(self, x):
