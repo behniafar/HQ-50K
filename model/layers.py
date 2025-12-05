@@ -153,6 +153,7 @@ class DynamicMoEBlock(nn.Module):
     def __init__(self, channels, num_experts=4, normal_active_experts = 1, expansion=4, alpha=0.1):
         assert num_experts >= 2, "num_experts must be at least 2"
         super().__init__()
+        self.alpha = alpha
         normal_active_experts = max(1, min(normal_active_experts, num_experts-1)) # clip normal_active_experts to [1, num_experts-1]
         self.num_experts = num_experts
         self.experts = nn.ModuleList([
@@ -166,7 +167,6 @@ class DynamicMoEBlock(nn.Module):
     def forward(self, x):
         # NOTE: maximize the gate scores std during training
         # NOTE: Normal DAMoE do not use the router output as expert output's factor, but I did so to keep the gradient to flow properly.
-        # TODO: adjust min_score according to normal_active_experts
         B, C, H, W = x.shape
         x = x.permute(0, 2, 3, 1).reshape(-1, C)  # (B*H*W, C)
         output = self.full_time_active_expert(x)  # (B*H*W, C)
@@ -175,6 +175,9 @@ class DynamicMoEBlock(nn.Module):
             mask = self.router_scores[:, expert_idx] >= self.min_score  # (B*H*W)
             output[mask] = output[mask] + self.experts[expert_idx](x[mask]) * self.router_scores[mask, expert_idx:expert_idx+1]
         output = output.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
+        if self.training:
+            num_active_experts = (self.router_scores >= self.min_score).float().sum(dim=1).mean().item()
+            self.min_score = self.min_score + self.alpha * (num_active_experts - self.normal_active_experts)
         return output
 
 MoEBlock = StaticMoEBlock  # default MoEBlock
