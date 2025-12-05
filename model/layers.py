@@ -118,9 +118,9 @@ class FeedForward(nn.Module):
     def __init__(self, channels, expansion=4):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(channels, channels * expansion, 1),
+            nn.Linear(channels, channels * expansion),
             nn.GELU(),
-            nn.Conv2d(channels * expansion, channels, 1),
+            nn.Linear(channels * expansion, channels),
         )
 
     def forward(self, x):
@@ -133,18 +133,20 @@ class StaticMoEBlock(nn.Module):
         self.experts = nn.ModuleList([
             FeedForward(channels, expansion) for _ in range(num_experts)
         ])
-        self.router = nn.Conv2d(channels, num_experts, 1)
+        self.router = nn.Linear(channels, num_experts)
 
     def forward(self, x):
         # NOTE: maximize the gate scores std during training
         # NOTE: Normal DAMoE do not use the router output as expert output's factor, but I did so to keep the gradient to flow properly.
         B, C, H, W = x.shape
-        self.router_scores = F.softmax(self.router(x), dim=1)  # (B, num_experts, H, W)
-        expert_outputs = torch.stack([expert(x) for expert in self.experts], dim=1)  # (B, num_experts, C, H, W)
-        topk_scores, topk_indices = torch.topk(self.router_scores, k=self.k, dim=1)  # (B, k, H, W)
-        mask = torch.zeros_like(self.router_scores)
-        mask.scatter_(1, topk_indices, self.router_scores)
-        output = (expert_outputs * mask.unsqueeze(2)).sum(dim=1) # (B, C, H, W)
+        x = x.permute(0, 2, 3, 1).reshape(-1, C)  # (B*H*W, C)
+        output = torch.zeros_like(x)
+        self.router_scores = F.softmax(self.router(x), dim=1)  # (B*H*W, num_experts)
+        topk_scores, topk_indices = torch.topk(self.router_scores, k=self.k, dim=1)
+        for expert_idx in range(self.experts.__len__()):
+            mask = (topk_indices == expert_idx).any(dim=1)  # (B*H*W)
+            output[mask] = self.experts[expert_idx](x[mask]) * self.router_scores[mask, expert_idx:expert_idx+1]
+        output = output.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
         return output
 
 class DynamicMoEBlock(nn.Module):
