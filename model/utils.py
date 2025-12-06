@@ -124,7 +124,7 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
         router_loss = 0
         for name, scores in router_scores.items():
             # Encourage diversity in router scores by maximizing their standard deviation
-            router_loss -= scores  # scaling factor to balance with main loss
+            router_loss += scores  # scaling factor to balance with main loss
         (loss + router_loss).backward()
         optimizer.step()
 
