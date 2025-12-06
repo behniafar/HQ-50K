@@ -164,7 +164,7 @@ def get_router_score_loss(model):
     router_scores = {}
     for name, module in model.named_modules():
         if module.__class__.__name__ == 'StaticMoEBlock' or module.__class__.__name__ == 'DynamicMoEBlock':
-            router_scores[name] = module.router_scores_buffer.std(0).mean() * 1e-2
+            router_scores[name] = -module.router_scores_buffer.std(0).mean() * 1e-2
             if module.__class__.__name__ == 'DynamicMoEBlock':
                 router_scores[name] += (module.router_scores_buffer.sum(1).mean() - module.normal_active_experts_buffer).pow(2) * 1e-1
     return router_scores
