@@ -161,9 +161,9 @@ class DynamicMoEBlock(nn.Module):
             FeedForward(channels, expansion) for _ in range(num_experts-1)
         ])
         self.full_time_active_expert = FeedForward(channels, expansion)
-        self.normal_active_experts = normal_active_experts
+        self.normal_active_experts = torch.tensor(normal_active_experts)
+        self.register_buffer('normal_active_experts_buffer', self.normal_active_experts)
         self.router = nn.Linear(channels, num_experts)
-        self.min_score = 0.5
 
     def forward(self, x):
         # NOTE: maximize the gate scores std during training
@@ -172,14 +172,12 @@ class DynamicMoEBlock(nn.Module):
         x = x.permute(0, 2, 3, 1).reshape(-1, C)  # (B*H*W, C)
         output = self.full_time_active_expert(x)  # (B*H*W, C)
         self.router_scores = F.sigmoid(self.router(x))  # (B*H*W, num_experts)
-        num_active_experts = (self.router_scores >= self.min_score).float().sum(dim=1, keepdim=True)
+        num_active_experts = (self.router_scores >= .5).float().sum(dim=1, keepdim=True)
         self.register_buffer('router_scores_buffer', self.router_scores)
         for expert_idx in range(self.experts.__len__()):
-            mask = self.router_scores[:, expert_idx] >= self.min_score  # (B*H*W)
+            mask = self.router_scores[:, expert_idx] >= .5  # (B*H*W)
             if mask.any(): output[mask] = output[mask] + self.experts[expert_idx](x[mask]) * self.router_scores[mask, expert_idx:expert_idx+1] / num_active_experts[mask]
         output = output.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
-        if self.training:
-            self.min_score = self.min_score + self.alpha * (num_active_experts.mean().item() - self.normal_active_experts)
         return output
 
 MoEBlock = StaticMoEBlock  # default MoEBlock

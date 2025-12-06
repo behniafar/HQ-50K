@@ -28,14 +28,14 @@ def train(model, dataloader, optimizer, repeat_factor = 1, ema = .9):
         reals = reals.to(device)
 
         loss = model.loss(reals, repeat_factor=repeat_factor)
-        router_scores = get_router_scores(model)
+        router_scores = get_router_score_loss(model)
         total_loss = loss.item() * (1 - ema) + total_loss * ema if total_loss is not None else loss.item()
         bar.set_description(f"Loss: {total_loss:.6f}")
 
         router_loss = 0
         for name, scores in router_scores.items():
             # Encourage diversity in router scores by maximizing their standard deviation
-            router_loss -= torch.std(scores) * 1e-2  # scaling factor to balance with main loss
+            router_loss += scores  # scaling factor to balance with main loss
 
         (loss + router_loss).backward()
         optimizer.step()
@@ -117,14 +117,14 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
         masks = torch.clamp(masks, 0, 1)
         
         loss = model.loss(reals, mask=masks, repeat_factor=repeat_factor)
-        router_scores = get_router_scores(model)
+        router_scores = get_router_score_loss(model)
         total_loss = loss.item() * (1 - ema) + total_loss * ema if total_loss is not None else loss.item()
         bar.set_description(f"Loss: {total_loss:.6f}")
 
         router_loss = 0
         for name, scores in router_scores.items():
             # Encourage diversity in router scores by maximizing their standard deviation
-            router_loss -= torch.std(scores) * 1e-2  # scaling factor to balance with main loss
+            router_loss -= scores  # scaling factor to balance with main loss
         (loss + router_loss).backward()
         optimizer.step()
 
@@ -160,9 +160,11 @@ def save_model(model, optimizer, epoch, filename='model.pth'):
 def get_num_params(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def get_router_scores(model):
+def get_router_score_loss(model):
     router_scores = {}
     for name, module in model.named_modules():
         if module.__class__.__name__ == 'StaticMoEBlock' or module.__class__.__name__ == 'DynamicMoEBlock':
-            router_scores[name] = module.router_scores_buffer
+            router_scores[name] = module.router_scores_buffer.std(0).mean() * 1e-2
+            if module.__class__.__name__ == 'DynamicMoEBlock':
+                router_scores[name] += (module.router_scores_buffer.sum(1).mean() - module.normal_active_experts_buffer).pow(2) * 1e-1
     return router_scores
