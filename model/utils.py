@@ -28,10 +28,16 @@ def train(model, dataloader, optimizer, repeat_factor = 1, ema = .9):
         reals = reals.to(device)
 
         loss = model.loss(reals, repeat_factor=repeat_factor)
+        router_scores = get_router_scores(model)
         total_loss = loss.item() * (1 - ema) + total_loss * ema if total_loss is not None else loss.item()
         bar.set_description(f"Loss: {total_loss:.6f}")
 
-        loss.backward()
+        router_loss = 0
+        for name, scores in router_scores.items():
+            # Encourage diversity in router scores by maximizing their standard deviation
+            router_loss -= torch.std(scores) * 1e-2  # scaling factor to balance with main loss
+
+        (loss + router_loss).backward()
         optimizer.step()
 
 @torch.no_grad()
@@ -111,11 +117,16 @@ def masked_train(model, dataloader, optimizer, mask_maker = [RandomSquareMask(),
         masks = torch.clamp(masks, 0, 1)
         
         loss = model.loss(reals, mask=masks, repeat_factor=repeat_factor)
-        loss.backward()
-        optimizer.step()
-        
+        router_scores = get_router_scores(model)
         total_loss = loss.item() * (1 - ema) + total_loss * ema if total_loss is not None else loss.item()
         bar.set_description(f"Loss: {total_loss:.6f}")
+
+        router_loss = 0
+        for name, scores in router_scores.items():
+            # Encourage diversity in router scores by maximizing their standard deviation
+            router_loss -= torch.std(scores) * 1e-2  # scaling factor to balance with main loss
+        (loss + router_loss).backward()
+        optimizer.step()
 
 @torch.no_grad()
 def masked_demo(model, images, masks = None, steps=50, filename=None):
@@ -145,3 +156,13 @@ def save_model(model, optimizer, epoch, filename='model.pth'):
         'optimizer_state_dict': optimizer.state_dict(),
         'epoch': epoch
     }, filename)
+
+def get_num_params(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def get_router_scores(model):
+    router_scores = {}
+    for name, module in model.named_modules():
+        if module.__class__.__name__ == 'StaticMoEBlock' or module.__class__.__name__ == 'DynamicMoEBlock':
+            router_scores[name] = module.router_scores_buffer
+    return router_scores

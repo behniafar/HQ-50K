@@ -134,14 +134,15 @@ class StaticMoEBlock(nn.Module):
             FeedForward(channels, expansion) for _ in range(num_experts)
         ])
         self.router = nn.Linear(channels, num_experts)
-        self.register_backward_hook(self._backward_hook)
 
     def forward(self, x):
+        # NOTE: maximize the gate scores std during training
         # NOTE: Normal DAMoE do not use the router output as expert output's factor, but I did so to keep the gradient to flow properly.
         B, C, H, W = x.shape
         x = x.permute(0, 2, 3, 1).reshape(-1, C)  # (B*H*W, C)
         output = torch.zeros_like(x)
         self.router_scores = F.softmax(self.router(x), dim=1)  # (B*H*W, num_experts)
+        self.register_buffer('router_scores_buffer', self.router_scores)
         topk_scores, topk_indices = torch.topk(self.router_scores, k=self.k, dim=1)
         for expert_idx in range(self.experts.__len__()):
             mask = (topk_indices == expert_idx).any(dim=1)  # (B*H*W)
@@ -149,13 +150,6 @@ class StaticMoEBlock(nn.Module):
         output = output.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
         return output
 
-    def _backward_hook(self, module, grad_input, grad_output):
-        # maximize the router scores std during training
-        if self.training:
-            scores = self.router_scores
-            std = scores.std(dim=0, keepdim=True)  # (1, num_experts)
-            grad_output[0].data -= std * 0.01  # adjust the factor as needed
-        
 class DynamicMoEBlock(nn.Module):
     def __init__(self, channels, num_experts=8, k = .5, expansion=4, alpha=0.1):
         assert num_experts >= 2, "num_experts must be at least 2"
@@ -170,15 +164,16 @@ class DynamicMoEBlock(nn.Module):
         self.normal_active_experts = normal_active_experts
         self.router = nn.Linear(channels, num_experts)
         self.min_score = 0.5
-        self.register_backward_hook(StaticMoEBlock._backward_hook)
 
     def forward(self, x):
+        # NOTE: maximize the gate scores std during training
         # NOTE: Normal DAMoE do not use the router output as expert output's factor, but I did so to keep the gradient to flow properly.
         B, C, H, W = x.shape
         x = x.permute(0, 2, 3, 1).reshape(-1, C)  # (B*H*W, C)
         output = self.full_time_active_expert(x)  # (B*H*W, C)
         self.router_scores = F.sigmoid(self.router(x))  # (B*H*W, num_experts)
         num_active_experts = (self.router_scores >= self.min_score).float().sum(dim=1, keepdim=True)
+        self.register_buffer('router_scores_buffer', self.router_scores)
         for expert_idx in range(self.experts.__len__()):
             mask = self.router_scores[:, expert_idx] >= self.min_score  # (B*H*W)
             if mask.any(): output[mask] = output[mask] + self.experts[expert_idx](x[mask]) * self.router_scores[mask, expert_idx:expert_idx+1] / num_active_experts[mask]
