@@ -134,9 +134,9 @@ class StaticMoEBlock(nn.Module):
             FeedForward(channels, expansion) for _ in range(num_experts)
         ])
         self.router = nn.Linear(channels, num_experts)
+        self.register_backward_hook(self._backward_hook)
 
     def forward(self, x):
-        # NOTE: maximize the gate scores std during training
         # NOTE: Normal DAMoE do not use the router output as expert output's factor, but I did so to keep the gradient to flow properly.
         B, C, H, W = x.shape
         x = x.permute(0, 2, 3, 1).reshape(-1, C)  # (B*H*W, C)
@@ -149,6 +149,13 @@ class StaticMoEBlock(nn.Module):
         output = output.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
         return output
 
+    def _backward_hook(self, module, grad_input, grad_output):
+        # maximize the router scores std during training
+        if self.training:
+            scores = self.router_scores
+            std = scores.std(dim=0, keepdim=True)  # (1, num_experts)
+            grad_output[0].data -= std * 0.01  # adjust the factor as needed
+        
 class DynamicMoEBlock(nn.Module):
     def __init__(self, channels, num_experts=8, k = .5, expansion=4, alpha=0.1):
         assert num_experts >= 2, "num_experts must be at least 2"
@@ -163,9 +170,9 @@ class DynamicMoEBlock(nn.Module):
         self.normal_active_experts = normal_active_experts
         self.router = nn.Linear(channels, num_experts)
         self.min_score = 0.5
+        self.register_backward_hook(StaticMoEBlock._backward_hook)
 
     def forward(self, x):
-        # NOTE: maximize the gate scores std during training
         # NOTE: Normal DAMoE do not use the router output as expert output's factor, but I did so to keep the gradient to flow properly.
         B, C, H, W = x.shape
         x = x.permute(0, 2, 3, 1).reshape(-1, C)  # (B*H*W, C)
@@ -181,8 +188,6 @@ class DynamicMoEBlock(nn.Module):
         return output
 
 MoEBlock = StaticMoEBlock  # default MoEBlock
-    
-# TODO: optimize MoEBlock, i mean the model must use selected experts only for each pixel that selects them
 
 class StaticDAMoEBlock(nn.Module):
     def __init__(self, channels, num_experts=8, k = 2, expansion=4, heads=4):
