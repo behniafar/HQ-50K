@@ -19,11 +19,11 @@ class ResConvBlock(ResidualBlock):
         skip = None if c_in == c_out else nn.Conv2d(c_in, c_out, 1, bias=False)
         super().__init__([
             nn.Conv2d(c_in, c_mid, 3, padding=1, bias=False),
-            nn.BatchNorm2d(c_mid),
-            nn.ReLU(),
+            nn.GroupNorm(32, c_mid),
+            nn.SiLU(),
             nn.Conv2d(c_mid, c_out, 3, padding=1, bias=False),
-            nn.BatchNorm2d(c_out),
-            nn.ReLU(),
+            nn.GroupNorm(32, c_out),
+            nn.SiLU(),
         ], skip)
 
 
