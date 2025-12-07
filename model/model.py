@@ -2,6 +2,7 @@ import torch
 from layers import *
 import torch.nn as nn
 from tqdm import trange
+from torchvision.transforms import Pad
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -9,6 +10,7 @@ class UNetLevel(nn.Module):
     def __init__(self,
                  *channels: list[int],
                  next_level = None,
+                 level = 0,
                  num_attention_head=None, 
                  positional_encoding_type=None,
                  time_dims = 0,
@@ -17,6 +19,7 @@ class UNetLevel(nn.Module):
         super().__init__()
         channels = list(channels) # for modify, it can't be tuple
         channels[0] += time_dims
+        self.level = level
 
         self.encoder = nn.Sequential(
             *[ResConvBlock(c_in, c_out, c_out) for c_in, c_out in zip(channels[:-1], channels[1:])]
@@ -73,21 +76,28 @@ class UNet(nn.Module):
                 num_experts=8,
                 k = 1,
                 expansion=4):
-        assert  len(channels) >= 2, 'UNet at least have 2 levels'
+        num_levels = len(channels)
+        assert  num_levels >= 2, 'UNet at least have 2 levels'
         if MoEBlock_type == StaticMoEBlock:
             assert k % 1 == 0, "k must be an integer for StaticMoEBlock, or you can use DynamicMoEBlock instead"
         super().__init__()
-        unet = UNetLevel(*([channels[-2]] + [channels[-1]] * num_blocks), num_attention_head=num_attention_head, positional_encoding_type=positional_encoding_type, next_level=
-                           UNetLevel(*([channels[-1]] + [channels[-1]] * num_blocks), num_attention_head=num_attention_head, positional_encoding_type=positional_encoding_type, next_level=None, time_dims=time_dims if len(channels) == 2 else 0,
+        unet = UNetLevel(*([channels[-2]] + [channels[-1]] * num_blocks), num_attention_head=num_attention_head, positional_encoding_type=positional_encoding_type, level=1, next_level=
+                           UNetLevel(*([channels[-1]] + [channels[-1]] * num_blocks), num_attention_head=num_attention_head, level=0, time_dims=time_dims if len(channels) == 2 else 0,
                                      MoEBlock=MoEBlock_type(channels[-1], num_experts, k, expansion) if MoEBlock_type is not None else None),
                          MoEBlock=MoEBlock_type(channels[-1], num_experts, k, expansion) if MoEBlock_type is not None else None, time_dims=0)
-        if len(channels) > 2:
-            for level in range(len(channels) - 2, 1, -1):
-                unet = UNetLevel(*([channels[level-1]] + [channels[level]] * num_blocks), next_level=unet)
+        if num_levels > 2:
+            for i in range(-num_levels, -2):
+                unet = UNetLevel(*([channels[i]] + [channels[i+1]] * num_blocks), next_level=unet, level=-i-1)
             unet = UNetLevel(*([channels[0]] + [channels[1]] * num_blocks), next_level=unet, time_dims=time_dims)
         self.unet = unet
     
     def forward(self, x):
+        B, C, H, W = x.shape
+        min_H = min_W = 2 ** self.unet.level
+        if H % min_H != 0 or W % min_W != 0:
+            true_H = ((H + min_H - 1) // min_H) * min_H
+            true_W = ((W + min_W - 1) // min_W) * min_W
+            x = Pad((0, true_W - W, 0, true_H - H))(x)
         return self.unet(x)
 
 class CosineSchedule:
